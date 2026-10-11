@@ -1,0 +1,32 @@
+# Ignore data outputs and caches
+data/raw/
+data/pages/
+data/chunks/
+data/index/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Hugging Face / model caches (if stored locally)
+*.bin
+*.safetensors
+
+# OS
+.DS_Store
+Thumbs.db
