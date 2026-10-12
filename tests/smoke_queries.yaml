@@ -1,0 +1,16 @@
+# Smoke queries for verify_index.py (report-only; never affects exit code).
+# Fill in questions whose answers you know are in the books. For each, give the
+# expected book slug and the pdf page range where the answer lives; verify_index
+# prints the rank of the first matching chunk for BM25 and Chroma separately.
+#
+# Example (uncomment and edit):
+#
+# queries:
+#   - query: "how does reciprocal rank fusion combine BM25 and vector results"
+#     expected_book: "some-book-slug"
+#     expected_pdf_pages: [120, 135]
+#
+#   - query: "what is the bias-variance tradeoff"
+#     expected_book: "some-book-slug"
+#     expected_pdf_pages: [40, 60]
+queries: []
