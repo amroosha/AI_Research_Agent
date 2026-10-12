@@ -9,10 +9,9 @@ contract and its reducer.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from typing_extensions import TypedDict
 
 # The ordered set of query-rewrite strategies. Shared by config and state.
 Strategy = Literal["step_back", "specific", "fusion"]
@@ -88,5 +87,17 @@ def merge_chunks(old: list[Chunk], new: list[Chunk]) -> list[Chunk]:
     return [merged[chunk_id] for chunk_id in order]
 
 
-class AgentState(TypedDict := object):  # type: ignore[misc]
-    """Placeholder replaced below; see class AgentState definition."""
+class AgentState(TypedDict):
+    """Single-turn Q&A state.
+
+    ``chunks`` uses :func:`merge_chunks` as its reducer; ``strategies_tried``
+    accumulates via list concatenation. There is no ``retry_count`` field: the
+    number of retries equals ``len(strategies_tried)``.
+    """
+
+    question: str
+    current_query: str
+    chunks: Annotated[list[Chunk], merge_chunks]
+    strategies_tried: Annotated[list[Literal["step_back", "specific", "fusion"]], operator.add]
+    answer: str | None
+    cited_chunk_ids: list[str]
