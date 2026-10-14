@@ -49,7 +49,15 @@ class BgeEmbedder:
         assert self._model.max_seq_length == BGE_MAX_SEQ_LENGTH, (
             f"expected max_seq_length {BGE_MAX_SEQ_LENGTH}, got {self._model.max_seq_length}"
         )
-        self.dim = int(self._model.get_sentence_embedding_dimension())
+        # sentence-transformers >= 6 renamed the accessor; prefer the new name
+        # but stay compatible if only the old one exists.
+        get_dim = getattr(self._model, "get_embedding_dimension", None)
+        if get_dim is None:
+            get_dim = self._model.get_sentence_embedding_dimension
+        dim = get_dim()
+        if dim is None:  # pragma: no cover - only if the model omits the dim
+            dim = self._model.get_sentence_embedding_dimension()
+        self.dim = int(dim)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         vectors = self._model.encode(

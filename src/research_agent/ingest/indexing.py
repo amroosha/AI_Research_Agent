@@ -519,7 +519,7 @@ def verify_index(
         top = collection.query(query_embeddings=[vector], n_results=1)
         if top["ids"][0] and top["ids"][0][0] == cid:
             chroma_hits += 1
-        first_tokens = tokenize(record["index_text"])[:15]
+        first_tokens = tokenize(record["text"])[:30]
         top5 = bm25_bundle["bm25"].get_top_n(first_tokens, bm25_bundle["ids"], n=5)
         if cid in top5:
             bm25_hits += 1
