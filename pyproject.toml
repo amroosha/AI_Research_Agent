@@ -13,6 +13,8 @@ dependencies = [
     "rank-bm25",
     "pyyaml",
     "tqdm",
+    "langchain-ollama",
+    "httpx",
 ]
 
 [project.optional-dependencies]

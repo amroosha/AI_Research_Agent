@@ -1,12 +1,19 @@
 """Frozen configuration for routing (and, in later stages, ingestion).
 
 ``Settings`` holds routing thresholds and rewrite ordering. ``IngestSettings``
-is added in T3. Config is pure data: no I/O, no side effects.
+is added in T3, ``LLMSettings``/``RetrievalSettings`` in Stage 2. Config is
+pure data: no I/O, no side effects.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = PROJECT_ROOT / "data"
+CHUNKS_DIR = DATA_DIR / "chunks"
+INDEX_DIR = DATA_DIR / "index"
 
 
 @dataclass(frozen=True)
@@ -64,3 +71,43 @@ class IngestSettings:
 
 
 DEFAULT_INGEST_SETTINGS = IngestSettings()
+
+
+@dataclass(frozen=True)
+class LLMSettings:
+    """Ollama client configuration (Stage 2, T1).
+
+    The model tag is deliberately absent: it is read from the ``OLLAMA_MODEL``
+    environment variable at call time (see ``research_agent.llm.get_llm``), so
+    switching model tags never requires a config edit. ``OLLAMA_HOST``
+    overrides ``base_url`` at call time as well.
+    """
+
+    base_url: str = "http://localhost:11434"
+    num_ctx: int = 8192
+    temperature: float = 0.0
+    seed: int = 7
+    num_predict: int = 1024
+    keep_alive: str = "30m"
+    request_timeout_s: float = 300.0
+
+
+DEFAULT_LLM = LLMSettings()
+
+
+@dataclass(frozen=True)
+class RetrievalSettings:
+    """Hybrid retrieval configuration (Stage 2, T2).
+
+    ``retrieve_k_each``/``final_k`` are starting values to be tuned later on
+    the golden set. ``query_instruction`` is the bge query prefix, off by
+    default per the frozen decisions.
+    """
+
+    retrieve_k_each: int = 20
+    final_k: int = 6
+    rrf_k: int = 60
+    query_instruction: str = ""
+
+
+DEFAULT_RETRIEVAL = RetrievalSettings()
