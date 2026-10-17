@@ -1,10 +1,4 @@
-"""Core state types and reducers for the agent.
-
-This module defines the frozen ``Chunk`` contract, the ``merge_chunks`` reducer
-used to combine retrieved chunks across graph steps, and the ``AgentState``
-TypedDict shape. No LLM or LangGraph graph code lives here; only the pure data
-contract and its reducer.
-"""
+"""Persistent state contracts for all agent stages."""
 
 from __future__ import annotations
 
@@ -13,20 +7,11 @@ from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-# The ordered set of query-rewrite strategies. Shared by config and state.
 Strategy = Literal["step_back", "specific", "fusion"]
 
 
 class Chunk(BaseModel):
-    """A single retrievable unit of text.
-
-    Book chunks require ``book_slug`` and ``pdf_page_start``; web chunks require
-    ``url``. ``score`` is the grader relevance (0-100) or ``None`` when ungraded.
-    The model is frozen: update a field (e.g. score) via ``model_copy(update=...)``.
-    """
-
     model_config = ConfigDict(frozen=True)
-
     id: str
     text: str
     source: Literal["book", "web"]
@@ -43,24 +28,16 @@ class Chunk(BaseModel):
 
     @model_validator(mode="after")
     def _validate_source_fields(self) -> Chunk:
-        if self.source == "book":
-            if self.book_slug is None:
-                raise ValueError("book chunks require book_slug")
-            if self.pdf_page_start is None:
-                raise ValueError("book chunks require pdf_page_start")
-        elif self.source == "web":
-            if self.url is None:
-                raise ValueError("web chunks require url")
-        if self.score is not None and not (0 <= self.score <= 100):
+        if self.source == "book" and (self.book_slug is None or self.pdf_page_start is None):
+            raise ValueError("book chunks require book_slug and pdf_page_start")
+        if self.source == "web" and self.url is None:
+            raise ValueError("web chunks require url")
+        if self.score is not None and not 0 <= self.score <= 100:
             raise ValueError("score must be between 0 and 100 when set")
         return self
 
 
 def _prefer(existing: Chunk, candidate: Chunk) -> Chunk:
-    """Return the chunk to keep for a duplicate id.
-
-    Any numeric score beats ``None``; on equal scores keep the existing chunk.
-    """
     if existing.score is None:
         return candidate if candidate.score is not None else existing
     if candidate.score is None:
@@ -69,35 +46,32 @@ def _prefer(existing: Chunk, candidate: Chunk) -> Chunk:
 
 
 def merge_chunks(old: list[Chunk], new: list[Chunk]) -> list[Chunk]:
-    """Merge two chunk lists by ``id``.
-
-    Dedupes by id, keeping the higher-scored chunk on duplicates (any score
-    beats ``None``; a tie keeps the existing one). Preserves first-seen order
-    and never mutates its inputs.
-    """
     merged: dict[str, Chunk] = {}
     order: list[str] = []
     for chunk in (*old, *new):
-        existing = merged.get(chunk.id)
-        if existing is None:
-            merged[chunk.id] = chunk
+        if chunk.id not in merged:
             order.append(chunk.id)
+            merged[chunk.id] = chunk
         else:
-            merged[chunk.id] = _prefer(existing, chunk)
-    return [merged[chunk_id] for chunk_id in order]
+            merged[chunk.id] = _prefer(merged[chunk.id], chunk)
+    return [merged[key] for key in order]
 
 
 class AgentState(TypedDict):
-    """Single-turn Q&A state.
-
-    ``chunks`` uses :func:`merge_chunks` as its reducer; ``strategies_tried``
-    accumulates via list concatenation. There is no ``retry_count`` field: the
-    number of retries equals ``len(strategies_tried)``.
-    """
-
     question: str
     current_query: str
+    mode: Literal["fast", "deep"]
+    queries: list[str]
+    tried_queries: Annotated[list[str], operator.add]
     chunks: Annotated[list[Chunk], merge_chunks]
-    strategies_tried: Annotated[list[Literal["step_back", "specific", "fusion"]], operator.add]
+    strategies_tried: Annotated[list[Strategy], operator.add]
+    web_used: bool
     answer: str | None
     cited_chunk_ids: list[str]
+    status: str
+    warnings: Annotated[list[str], operator.add]
+    llm_calls: Annotated[int, operator.add]
+
+
+# Named alias retained for importers that used the first Stage 3 draft.
+Stage3State = AgentState
