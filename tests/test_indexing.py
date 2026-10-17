@@ -11,8 +11,10 @@ import math
 from pathlib import Path
 
 import pytest
+import yaml
 
 from research_agent.config import DEFAULT_INGEST_SETTINGS
+from research_agent.ingest import indexing
 from research_agent.ingest.indexing import (
     COLLECTION_NAME,
     IndexStateError,
@@ -182,6 +184,61 @@ def test_cosine_distance_of_identical_vectors(
     report = verify_index(chunks_dir, index_dir, embedder, show_progress=False)
     cosine = next(c for c in report.checks if c.name == "cosine_self_distance")
     assert cosine.passed, cosine.detail
+
+
+def test_verify_smoke_handles_multi_range_and_negative(
+    chunks_dir: Path, tmp_path: Path, embedder: HashEmbedder, monkeypatch
+) -> None:
+    index_dir = tmp_path / "index"
+    _build(chunks_dir, index_dir, embedder)
+    smoke_path = tmp_path / "smoke.yaml"
+    smoke_path.write_text(
+        yaml.safe_dump(
+            {
+                "queries": [
+                    {
+                        "query": "positive",
+                        "expected_book": "synthetic-book",
+                        "expected_pdf_pages": [1, 1],
+                    },
+                    {
+                        "query": "multi",
+                        "expected_book": "synthetic-book",
+                        "expected_pdf_pages": [[1, 1], [2, 2]],
+                    },
+                    {
+                        "query": "negative",
+                        "expected_book": "none",
+                        "expected_pdf_pages": [],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        indexing,
+        "_chroma_ranked",
+        lambda collection, query, embedder: [
+            ("first", {"book_slug": "synthetic-book", "pdf_page_start": 1, "pdf_page_end": 1}),
+            ("second", {"book_slug": "synthetic-book", "pdf_page_start": 2, "pdf_page_end": 2}),
+        ],
+    )
+    monkeypatch.setattr(
+        indexing,
+        "_bm25_ranked",
+        lambda bundle, records, query: [
+            ("first", {"book_slug": "synthetic-book", "pdf_page_start": 1, "pdf_page_end": 1}),
+            ("second", {"book_slug": "synthetic-book", "pdf_page_start": 2, "pdf_page_end": 2}),
+        ],
+    )
+    report = verify_index(chunks_dir, index_dir, embedder, smoke_path=smoke_path)
+    assert [(row["chroma_rank"], row["bm25_rank"]) for row in report.smoke] == [
+        (1, 1),
+        (1, 1),
+        (None, None),
+    ]
+    assert report.smoke[-1]["negative"] is True
 
 
 # --- tokenizer ---------------------------------------------------------------

@@ -126,10 +126,10 @@ def run_system(
         started = time.perf_counter()
         if name == "bm25":
             ids = retriever.search_bm25(item.query, RETRIEVE_K)
-            chunks = [retriever.chunks_by_id[chunk_id] for chunk_id in ids]
+            chunks = retriever.get_chunks(ids)
         elif name.startswith("vector"):
             ids = retriever.search_vector(item.query, RETRIEVE_K)
-            chunks = [retriever.chunks_by_id[chunk_id] for chunk_id in ids]
+            chunks = retriever.get_chunks(ids)
         else:  # hybrid
             chunks = retriever.retrieve(item.query, final_k=RETRIEVE_K)
         latencies.append(time.perf_counter() - started)

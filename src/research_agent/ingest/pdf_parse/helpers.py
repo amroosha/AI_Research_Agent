@@ -90,6 +90,8 @@ def section_path_for_page(toc: list[list[Any]], page: int) -> list[str]:
     stack: list[tuple[int, str]] = []
     for entry in toc:
         level, title, start = int(entry[0]), str(entry[1]), int(entry[2])
+        if start < 1:
+            continue
         if start > page:
             break
         while stack and stack[-1][0] >= level:

@@ -128,16 +128,46 @@ def group_blocks(blocks: list[Block]) -> list[list[Block]]:
 # --------------------------------------------------------------------------- #
 # Oversize splitting
 # --------------------------------------------------------------------------- #
-def _hard_split(text: str, count_tokens: Callable[[str], int], max_tokens: int) -> list[str]:
+def _hard_split(
+    text: str,
+    count_tokens: Callable[[str], int],
+    max_tokens: int,
+    header: Callable[[str], int],
+    kind: str,
+) -> list[str]:
     """Last-resort split of text that is over the limit even by sentence/line."""
+
+    def stored(candidate: str) -> str:
+        return f"{CODE_FENCE}\n{candidate}\n{CODE_FENCE}" if kind == "code" else candidate
+
+    def fits(candidate: str) -> bool:
+        return count_tokens(stored(candidate)) + header(candidate) <= max_tokens
+
+    def split_long_word(word: str) -> list[str]:
+        pieces: list[str] = []
+        remaining = word
+        while remaining:
+            size = len(remaining)
+            while size and not fits(remaining[:size]):
+                size //= 2
+            if size == 0:
+                raise ValueError("cannot split text to fit max_tokens")
+            pieces.append(remaining[:size])
+            remaining = remaining[size:]
+        return pieces
+
     words = text.split()
     pieces: list[str] = []
     current: list[str] = []
     for word in words:
-        current.append(word)
-        if count_tokens(" ".join(current)) >= max_tokens:
+        candidate = " ".join([*current, word])
+        if current and not fits(candidate):
             pieces.append(" ".join(current))
             current = []
+        if not current and not fits(word):
+            pieces.extend(split_long_word(word))
+        else:
+            current.append(word)
     if current:
         pieces.append(" ".join(current))
     return pieces or [text]
@@ -205,7 +235,7 @@ def split_block(
     result: list[Piece] = []
     for text in pieces_text:
         if over(text):
-            for hard in _hard_split(text, count_tokens, max_tokens):
+            for hard in _hard_split(text, count_tokens, max_tokens, header, block.kind):
                 result.append(_piece_from(block, hard))
         else:
             result.append(_piece_from(block, text))
@@ -246,6 +276,7 @@ def _overlap_pieces(
             printed_page_start=last.printed_page_start,
             printed_page_end=last.printed_page_end,
             section_path=list(last.section_path),
+            is_overlap=True,
         )
     ]
 
@@ -270,7 +301,12 @@ def _merge_tiny_final(
     if count_tokens(last.text) + header_len(last.text) >= settings.min_chunk_tokens:
         return chunks
     prev = chunks[-2]
-    merged = _Chunk(pieces=[*prev.pieces, *last.pieces])
+    final_pieces = list(last.pieces)
+    while final_pieces and final_pieces[0].is_overlap:
+        final_pieces.pop(0)
+    if not final_pieces:
+        return chunks
+    merged = _Chunk(pieces=[*prev.pieces, *final_pieces])
     if count_tokens(merged.text) + header_len(merged.text) <= settings.max_tokens:
         return [*chunks[:-2], merged]
     return chunks
@@ -292,7 +328,8 @@ def _pack_group(
     # Expand each block into pieces, splitting any single block that is oversize.
     pieces: list[Piece] = []
     for block in group:
-        if count_tokens(block.text) + header_len(block.text) > settings.max_tokens:
+        stored = _piece_from(block, block.text).text
+        if count_tokens(stored) + header_len(block.text) > settings.max_tokens:
             pieces.extend(split_block(block, count_tokens, settings.max_tokens, header_len))
         else:
             pieces.append(_piece_from(block, block.text))

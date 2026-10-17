@@ -16,6 +16,7 @@ import logging
 import math
 import time
 from importlib import resources
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -43,6 +44,15 @@ class GradeBatch(BaseModel):
     scores: list[int]
 
 
+class ChunkLabel(BaseModel):
+    """Categorical pointwise relevance label."""
+
+    label: Literal["direct", "partial", "related", "unrelated"]
+
+
+LABEL_SCORES = {"direct": 95, "partial": 80, "related": 60, "unrelated": 15}
+
+
 def estimate_tokens(text: str) -> int:
     """ceil(len(text) / 3.5): the frozen rough token estimate."""
     return math.ceil(len(text) / CHARS_PER_TOKEN)
@@ -63,6 +73,11 @@ def build_prompt(question: str, chunks: list[Chunk], template: str) -> str:
         f"[{index}]\n{chunk.text}" for index, chunk in enumerate(chunks, start=1)
     )
     return template.format(question=question.strip(), passages=passages)
+
+
+def build_pointwise_prompt(question: str, chunk: Chunk, template: str) -> str:
+    """Fill the pointwise template for one passage."""
+    return template.format(question=question.strip(), passage=chunk.text)
 
 
 def group_tokens(question: str, chunks: list[Chunk]) -> int:
@@ -162,10 +177,47 @@ def _grade_batch(
                 latencies.append(time.perf_counter() - started)
         try:
             return validate_grades(result.refs, result.scores, expected)
-        except ValueError as exc:
+        except (ValueError, AttributeError, TypeError) as exc:
             last_error = exc
             logger.warning("grader batch output invalid (attempt %d): %s", attempt + 1, exc)
     raise RuntimeError(f"grader batch failed twice: {last_error}")
+
+
+def _grade_pointwise(
+    llm,
+    question: str,
+    chunk: Chunk,
+    template: str,
+    parse_failures: list[str] | None,
+    latencies: list[float] | None,
+) -> int:
+    """Grade one chunk categorically, retrying once on invalid output."""
+    prompt = build_pointwise_prompt(question, chunk, template)
+    structured = llm.with_structured_output(ChunkLabel)
+    last_error: Exception | None = None
+    for attempt in range(2):
+        started = time.perf_counter()
+        try:
+            result = structured.invoke(prompt)
+            if result is None:
+                raise TypeError("pointwise grader returned None")
+            label = result.label
+            if label not in LABEL_SCORES:
+                raise ValueError(f"invalid pointwise label: {label!r}")
+            return LABEL_SCORES[label]
+        except (ValueError, AttributeError, TypeError) as exc:
+            last_error = exc
+            logger.warning("grader pointwise output invalid (attempt %d): %s", attempt + 1, exc)
+        except Exception as exc:  # noqa: BLE001 - call failure triggers the retry
+            last_error = exc
+            logger.warning("grader pointwise call failed (attempt %d): %s", attempt + 1, exc)
+        finally:
+            if latencies is not None:
+                latencies.append(time.perf_counter() - started)
+    logger.warning("grader failed for chunk %s; defaulting to score 0: %s", chunk.id, last_error)
+    if parse_failures is not None:
+        parse_failures.append(chunk.id)
+    return 0
 
 
 def grade_chunks(
@@ -188,6 +240,20 @@ def grade_chunks(
     """
     if not chunks:
         return []
+    if cfg.mode == "pointwise":
+        template = load_prompt("grader_v2")
+        return [
+            chunk.model_copy(
+                update={
+                    "score": _grade_pointwise(
+                        llm, question, chunk, template, parse_failures, latencies
+                    )
+                }
+            )
+            for chunk in chunks
+        ]
+    if cfg.mode != "batch":
+        raise ValueError(f"unsupported grader mode: {cfg.mode!r}")
     template = load_prompt(cfg.prompt_version)
     scores: dict[str, int] = {}
     for batch in build_batches(question, chunks, cfg, llm_cfg):

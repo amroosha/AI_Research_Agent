@@ -22,11 +22,80 @@ Outcome = str  # positive: correct | wrong_generate | needless_retry | retrieval
 #                                negative: correct | false_generate
 
 
-def proxy_labels(chunks: Sequence[Chunk], item: GoldenItem) -> list[bool]:
-    """Per-chunk proxy relevance: hits an expected range (T4 rule).
+def proxy_labels(chunks: Sequence[Chunk], item: GoldenItem) -> list[str]:
+    """Classify chunks as relevant, near, or not_relevant by page distance."""
 
-    Negatives (``item.is_negative``) label every chunk ``not_relevant``.
-    """
+    def label(chunk: Chunk) -> str:
+        if chunk_hits_item(chunk, item):
+            return "relevant"
+        if item.is_negative or item.book is None or chunk.book_slug != item.book:
+            return "not_relevant"
+        if chunk.pdf_page_start is None or chunk.pdf_page_end is None:
+            return "not_relevant"
+        for start, end in item.ranges:
+            if chunk.pdf_page_end >= start - 1 and chunk.pdf_page_start <= end + 1:
+                return "near"
+        return "not_relevant"
+
+    return [label(chunk) for chunk in chunks]
+
+
+def binary_relevant(labels: Sequence[str | bool]) -> list[bool]:
+    """Convert categorical or legacy boolean labels to relevant/not relevant."""
+    return [label is True or label == "relevant" for label in labels]
+
+
+def confusion_counts(predicted: Sequence[bool], actual: Sequence[bool]) -> dict[str, int]:
+    """Return TP, FP, FN, and TN counts."""
+    if len(predicted) != len(actual):
+        raise ValueError("predicted and actual must have the same length")
+    return {
+        "TP": int(sum(p and a for p, a in zip(predicted, actual, strict=True))),
+        "FP": int(sum(p and not a for p, a in zip(predicted, actual, strict=True))),
+        "FN": int(sum(not p and a for p, a in zip(predicted, actual, strict=True))),
+        "TN": int(sum(not p and not a for p, a in zip(predicted, actual, strict=True))),
+    }
+
+
+def base_rate(labels: Sequence[str | bool]) -> float:
+    """Share of chunks labeled relevant."""
+    return sum(binary_relevant(labels)) / len(labels) if labels else 0.0
+
+
+def similarity_baseline(
+    similarities: Sequence[float], labels: Sequence[str | bool], thresholds: Sequence[float]
+) -> dict[float, dict[str, Any]]:
+    """Evaluate a cosine-similarity threshold sweep."""
+    actual = binary_relevant(labels)
+    return {
+        threshold: {
+            **precision_recall_f1([similarity >= threshold for similarity in similarities], actual),
+            "confusion": confusion_counts(
+                [similarity >= threshold for similarity in similarities], actual
+            ),
+        }
+        for threshold in thresholds
+    }
+
+
+def top1_baseline(
+    rankings: Sequence[Sequence[Chunk]], labels: Sequence[Sequence[str | bool]]
+) -> dict[str, Any]:
+    """Treat only each query's rank-1 chunk as relevant."""
+    predicted = [index == 0 for chunks in rankings for index, _ in enumerate(chunks)]
+    actual = [
+        binary_relevant(item_labels)[index]
+        for item_labels, chunks in zip(labels, rankings, strict=True)
+        for index, _ in enumerate(chunks)
+    ]
+    return {
+        **precision_recall_f1(predicted, actual),
+        "confusion": confusion_counts(predicted, actual),
+    }
+
+
+def _legacy_proxy_labels(chunks: Sequence[Chunk], item: GoldenItem) -> list[bool]:
+    """Legacy boolean proxy retained for compatibility with v1 callers."""
     if item.is_negative:
         return [False] * len(chunks)
     return [chunk_hits_item(chunk, item) for chunk in chunks]
@@ -69,7 +138,7 @@ def score_distribution(scores: Sequence[int]) -> dict[str, float | None]:
 def question_outcome(
     item: GoldenItem,
     graded: Sequence[Chunk],
-    labels: Sequence[bool],
+    labels: Sequence[str | bool],
     threshold: int = 75,
 ) -> Outcome:
     """Classify one question's grading outcome.
@@ -90,12 +159,14 @@ def question_outcome(
             else "false_generate"
         )
     has_generate = any(chunk.score is not None and chunk.score >= threshold for chunk in graded)
-    has_relevant = any(labels)
+    has_relevant = any(binary_relevant(labels))
     if has_generate:
         return (
             "correct"
             if any(
-                label and chunk.score is not None and chunk.score >= threshold
+                label in (True, "relevant", "near")
+                and chunk.score is not None
+                and chunk.score >= threshold
                 for chunk, label in zip(graded, labels, strict=True)
             )
             else "wrong_generate"
@@ -106,7 +177,7 @@ def question_outcome(
 def threshold_sweep(
     items: Sequence[GoldenItem],
     gradeds: Sequence[Sequence[Chunk]],
-    labelss: Sequence[Sequence[bool]],
+    labelss: Sequence[Sequence[str | bool]],
     thresholds: Sequence[int] = tuple(range(50, 91, 5)),
 ) -> dict[int, dict[str, int]]:
     """Question-level outcome counts per candidate relevant-threshold."""

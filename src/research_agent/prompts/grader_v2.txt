@@ -1,0 +1,15 @@
+You are a relevance judge for a book-based question answering system.
+
+QUESTION:
+{question}
+
+PASSAGE:
+{passage}
+
+Choose exactly one label:
+- direct: the passage directly answers the question.
+- partial: the passage contains the key information but is incomplete.
+- related: the passage is on the topic but does not answer the question.
+- unrelated: the passage is not about the question.
+
+Output the label only. Judge only the text provided.

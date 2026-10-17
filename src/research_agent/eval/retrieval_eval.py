@@ -73,18 +73,14 @@ def hit_at_k(ranks: Sequence[int | None], k: int) -> tuple[int, int, float]:
     return hits, total, (hits / total if total else 0.0)
 
 
-def recall_at_k(coverages: Sequence[tuple[int, int]], k_hits: Sequence[bool]) -> float:
+def recall_at_k(coverages: Sequence[tuple[int, int]]) -> float:
     """Mean fraction of ranges covered by the top-k set.
 
-    ``coverages`` are (covered, total_ranges) per item; ``k_hits`` marks which
-    items had any hit within k (items with no hit contribute 0 coverage).
+    ``coverages`` are (covered, total_ranges) per item.
     """
     if not coverages:
         return 0.0
-    values = [
-        (covered / total) if hit and total else 0.0
-        for (covered, total), hit in zip(coverages, k_hits, strict=True)
-    ]
+    values = [(covered / total) if total else 0.0 for covered, total in coverages]
     return statistics.fmean(values)
 
 
@@ -159,14 +155,11 @@ def evaluate_system(
     """
     positives = [item for item in items if not item.is_negative]
     ranks: list[int | None] = []
-    coverage: list[tuple[int, int]] = []
     per_query: list[dict[str, Any]] = []
     for item in positives:
         chunks = rankings.get(item.id, [])
         rank = first_hit_rank(chunks, item)
         ranks.append(rank)
-        covered = ranges_covered(chunks, item)
-        coverage.append((covered, len(item.ranges)))
         per_query.append(
             {
                 "id": item.id,
@@ -177,13 +170,16 @@ def evaluate_system(
         )
 
     hit_table: dict[str, dict[str, Any]] = {}
-    k_hits: dict[int, list[bool]] = {}
+    recall_table: dict[str, float] = {}
     for k in ks:
         hits, total, fraction = hit_at_k(ranks, k)
-        k_hits[k] = [rank is not None and rank <= k for rank in ranks]
         hit_table[str(k)] = {"hits": hits, "total": total, "fraction": fraction}
+        coverage = [
+            (ranges_covered(rankings.get(item.id, [])[:k], item), len(item.ranges))
+            for item in positives
+        ]
+        recall_table[str(k)] = recall_at_k(coverage)
 
-    recall_table = {str(k): recall_at_k(coverage, k_hits[k]) for k in ks}
     return {
         "system": name,
         "hit_at_k": hit_table,

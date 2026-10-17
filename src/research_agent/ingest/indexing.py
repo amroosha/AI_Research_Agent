@@ -34,6 +34,7 @@ from rank_bm25 import BM25Okapi
 from tqdm import tqdm
 
 from research_agent.config import IngestSettings
+from research_agent.page_ranges import normalize_ranges
 
 from .embedder import Embedder
 
@@ -257,13 +258,15 @@ def load_bm25(path: Path) -> dict[str, Any]:
 def _rank_first_match(
     ranked: Sequence[tuple[str, dict[str, Any]]],
     expected_book: str,
-    page_lo: int,
-    page_hi: int,
+    ranges: Sequence[tuple[int, int]],
     limit: int = 10,
 ) -> int | None:
-    """1-based rank of the first result in ``ranked`` whose book matches and whose
-    pdf page range overlaps ``[page_lo, page_hi]``; ``None`` if none within ``limit``.
+    """Best 1-based rank of a result matching any expected page range.
+
+    ``None`` is returned if no result within ``limit`` matches the expected book
+    and any of the inclusive PDF page ranges.
     """
+    best_rank: int | None = None
     for position, (_, meta) in enumerate(ranked[:limit], start=1):
         if meta.get("book_slug") != expected_book:
             continue
@@ -271,9 +274,9 @@ def _rank_first_match(
         end = meta.get("pdf_page_end")
         if start is None or end is None:
             continue
-        if start <= page_hi and end >= page_lo:
-            return position
-    return None
+        if any(start <= page_hi and end >= page_lo for page_lo, page_hi in ranges):
+            best_rank = position if best_rank is None else min(best_rank, position)
+    return best_rank
 
 
 def _chroma_ranked(
@@ -535,18 +538,25 @@ def verify_index(
         for entry in data.get("queries", []) or []:
             query = entry.get("query", "")
             expected_book = entry.get("expected_book", "")
-            page_lo, page_hi = entry.get("expected_pdf_pages", [0, 0])
-            chroma_rank = _rank_first_match(
-                _chroma_ranked(collection, query, embedder), expected_book, page_lo, page_hi
-            )
-            bm25_rank = _rank_first_match(
-                _bm25_ranked(bm25_bundle, records_by_id, query), expected_book, page_lo, page_hi
-            )
+            raw_pages = entry.get("expected_pdf_pages")
+            ranges = normalize_ranges(raw_pages, "smoke query")
+            negative = str(expected_book).strip().lower() == "none"
+            if negative:
+                chroma_rank = None
+                bm25_rank = None
+            else:
+                chroma_rank = _rank_first_match(
+                    _chroma_ranked(collection, query, embedder), expected_book, ranges
+                )
+                bm25_rank = _rank_first_match(
+                    _bm25_ranked(bm25_bundle, records_by_id, query), expected_book, ranges
+                )
             report.smoke.append(
                 {
                     "query": query,
                     "expected_book": expected_book,
-                    "expected_pdf_pages": [page_lo, page_hi],
+                    "expected_pdf_pages": raw_pages,
+                    "negative": negative,
                     "chroma_rank": chroma_rank,
                     "bm25_rank": bm25_rank,
                 }

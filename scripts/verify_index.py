@@ -50,8 +50,16 @@ def main(argv: list[str] | None = None) -> int:
     if report.smoke:
         print("== smoke queries (report only) ==")
         for row in report.smoke:
-            chroma = row["chroma_rank"] if row["chroma_rank"] is not None else "miss"
-            bm25 = row["bm25_rank"] if row["bm25_rank"] is not None else "miss"
+            chroma = (
+                "neg"
+                if row["negative"]
+                else (row["chroma_rank"] if row["chroma_rank"] is not None else "miss")
+            )
+            bm25 = (
+                "neg"
+                if row["negative"]
+                else (row["bm25_rank"] if row["bm25_rank"] is not None else "miss")
+            )
             print(f"  chroma={chroma!s:>4}  bm25={bm25!s:>4}  | {row['query']}")
 
     if report.ok:

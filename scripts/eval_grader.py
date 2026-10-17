@@ -28,20 +28,21 @@ from typing import Any
 from research_agent.config import (
     CHUNKS_DIR,
     DATA_DIR,
-    DEFAULT_GRADER,
     DEFAULT_INGEST_SETTINGS,
     DEFAULT_LLM,
     DEFAULT_RETRIEVAL,
     INDEX_DIR,
+    GraderSettings,
 )
 from research_agent.eval.grader_eval import (
-    disagreements,
-    position_bias,
+    confusion_counts,
     precision_recall_f1,
     proxy_labels,
     question_outcome,
     score_distribution,
+    similarity_baseline,
     threshold_sweep,
+    top1_baseline,
 )
 from research_agent.eval.retrieval_eval import percentile
 from research_agent.golden import GoldenItem, load_golden
@@ -65,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--index", type=Path, default=INDEX_DIR)
     parser.add_argument("--chunks", type=Path, default=CHUNKS_DIR)
+    parser.add_argument(
+        "--grader-mode",
+        choices=("pointwise", "batch", "both"),
+        default="both",
+    )
     return parser
 
 
@@ -107,7 +113,7 @@ def _git_commit() -> str | None:
 def chunk_metrics_at_threshold(
     items: list[GoldenItem],
     gradeds: list[list[Chunk]],
-    labelss: list[list[bool]],
+    labelss: list[list[str]],
     threshold: int,
 ) -> dict[str, Any]:
     """Per-chunk precision/recall/F1 and score distributions at one threshold."""
@@ -119,15 +125,48 @@ def chunk_metrics_at_threshold(
         for chunk, label in zip(graded, labels, strict=True):
             score = chunk.score if chunk.score is not None else 0
             predicted.append(score >= threshold)
-            actual.append(label)
-            (relevant_scores if label else not_relevant_scores).append(score)
+            is_relevant = label == "relevant"
+            actual.append(is_relevant)
+            (relevant_scores if is_relevant else not_relevant_scores).append(score)
+    confusion = confusion_counts(predicted, actual)
     return {
         "precision_recall_f1": precision_recall_f1(predicted, actual),
+        "confusion": confusion,
+        "base_rate": sum(actual) / len(actual) if actual else 0.0,
         "score_distribution": {
             "relevant": score_distribution(relevant_scores),
             "not_relevant": score_distribution(not_relevant_scores),
         },
     }
+
+
+def _grade_mode(
+    mode: str,
+    llm,
+    items: list[GoldenItem],
+    retrieved: dict[str, list[Chunk]],
+    llm_cfg,
+) -> tuple[dict[str, Any], list[list[Chunk]], list[str], list[float]]:
+    cfg = GraderSettings(
+        mode=mode,
+        prompt_version="grader_v1" if mode == "batch" else "grader_v2",
+    )
+    failures: list[str] = []
+    latencies: list[float] = []
+    gradeds: list[list[Chunk]] = []
+    for item in items:
+        gradeds.append(
+            grade_chunks(
+                llm,
+                item.query,
+                retrieved[item.id],
+                cfg,
+                llm_cfg=llm_cfg,
+                parse_failures=failures,
+                latencies=latencies,
+            )
+        )
+    return {"mode": mode, "prompt_version": cfg.prompt_version}, gradeds, failures, latencies
 
 
 def recommend_threshold(sweep: dict[int, dict[str, int]]) -> int:
@@ -163,122 +202,123 @@ def main(argv: list[str] | None = None) -> int:
 
     embedder = BgeEmbedder(DEFAULT_INGEST_SETTINGS.embed_model)
     retriever = HybridRetriever(args.index, args.chunks, embedder, DEFAULT_RETRIEVAL)
-    llm = get_llm()
-    model_tag = os.environ.get("OLLAMA_MODEL", "").strip()
+    model_tag = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b").strip()
 
-    # Retrieve once; grade twice (original + reversed order for position bias).
     retrieved: dict[str, list[Chunk]] = {}
     for item in items:
         retrieved[item.id] = retriever.retrieve(item.query, final_k=args.top_n)
 
-    parse_failures: list[str] = []
-    batch_latencies: list[float] = []
-    gradeds: list[list[Chunk]] = []
-    gradeds_reversed: list[list[Chunk]] = []
-    for item in items:
-        chunks = retrieved[item.id]
-        print(f"grading {item.id}: {len(chunks)} chunks ...")
-        graded = grade_chunks(
-            llm,
-            item.query,
-            chunks,
-            DEFAULT_GRADER,
-            llm_cfg=DEFAULT_LLM,
-            parse_failures=parse_failures,
-            latencies=batch_latencies,
-        )
-        graded_rev = grade_chunks(
-            llm, item.query, list(reversed(chunks)), DEFAULT_GRADER, llm_cfg=DEFAULT_LLM
-        )
-        by_id = {chunk.id: chunk for chunk in graded_rev}
-        gradeds.append(graded)
-        gradeds_reversed.append([by_id[chunk.id] for chunk in graded])
-
     labelss = [proxy_labels(retrieved[item.id], item) for item in items]
     positives = [item for item in items if not item.is_negative]
     negatives = [item for item in items if item.is_negative]
-
-    # Per-chunk metrics at the two frozen band edges.
-    per_chunk = {
-        str(threshold): chunk_metrics_at_threshold(items, gradeds, labelss, threshold)
-        for threshold in (75, 50)
-    }
-
-    # Question-level outcomes at the route() threshold (75).
-    outcomes = {
-        item.id: question_outcome(item, graded, labels, 75)
-        for item, graded, labels in zip(items, gradeds, labelss, strict=True)
-    }
-    outcome_counts: dict[str, int] = {}
-    for outcome in outcomes.values():
-        outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
-
-    sweep = threshold_sweep(items, gradeds, labelss)
-    recommended = recommend_threshold(sweep)
-
-    # Position bias: pair original and reversed scores by chunk id.
-    bias_values: list[dict[str, float]] = []
-    for original, reversed_ in zip(gradeds, gradeds_reversed, strict=True):
-        rev_by_id = {chunk.id: chunk.score or 0 for chunk in reversed_}
-        bias_values.append(
-            position_bias(
-                [chunk.score or 0 for chunk in original],
-                [rev_by_id[chunk.id] for chunk in original],
-            )
+    modes = ("batch", "pointwise") if args.grader_mode == "both" else (args.grader_mode,)
+    reports: dict[str, Any] = {}
+    for mode in modes:
+        print(f"grading mode={mode}")
+        llm = get_llm(num_predict=32) if mode == "pointwise" else get_llm()
+        llm_cfg = DEFAULT_LLM
+        metadata, gradeds, parse_failures, latencies = _grade_mode(
+            mode, llm, items, retrieved, llm_cfg
         )
-    bias = {
-        "mean_abs_diff": statistics.fmean(row["mean_abs_diff"] for row in bias_values),
-        "flip_fraction": statistics.fmean(row["flip_fraction"] for row in bias_values),
-        "n": sum(row["n"] for row in bias_values),
+        per_chunk = {
+            str(threshold): chunk_metrics_at_threshold(items, gradeds, labelss, threshold)
+            for threshold in (75, 50)
+        }
+        outcomes = {
+            item.id: question_outcome(item, graded, labels, 75)
+            for item, graded, labels in zip(items, gradeds, labelss, strict=True)
+        }
+        outcome_counts: dict[str, int] = {}
+        for outcome in outcomes.values():
+            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+        sweep = threshold_sweep(items, gradeds, labelss)
+        n_total_chunks = sum(len(graded) for graded in gradeds)
+        reports[mode] = {
+            **metadata,
+            "model": model_tag,
+            "per_chunk": per_chunk,
+            "question_outcomes_at_75": outcome_counts,
+            "threshold_sweep": {str(k): v for k, v in sweep.items()},
+            "recommended_threshold": recommend_threshold(sweep),
+            "parse_failures": {
+                "count": len(parse_failures),
+                "rate": len(parse_failures) / n_total_chunks if n_total_chunks else 0.0,
+                "chunk_ids": parse_failures,
+            },
+            "latency_s": {
+                "median": statistics.median(latencies) if latencies else None,
+                "p95": percentile(latencies, 0.95) if latencies else None,
+                "n_calls": len(latencies),
+                "total": sum(latencies),
+            },
+            "per_question": [
+                {"id": item.id, "query": item.query, "outcome": outcomes[item.id]} for item in items
+            ],
+        }
+        if mode == "batch":
+            reports[mode]["position_bias"] = {"not_run": False}
+        else:
+            sample_pairs = [(item.query, chunk) for item in items for chunk in retrieved[item.id]][
+                :20
+            ]
+            stability_cfg = GraderSettings(mode="pointwise", prompt_version="grader_v2")
+            stability_llm_cfg = get_llm(num_predict=32)
+            first = [
+                grade_chunks(
+                    llm,
+                    query,
+                    [chunk],
+                    stability_cfg,
+                    llm_cfg=stability_llm_cfg,
+                )[0]
+                for query, chunk in sample_pairs
+            ]
+            second = [
+                grade_chunks(
+                    llm,
+                    query,
+                    [chunk],
+                    stability_cfg,
+                    llm_cfg=stability_llm_cfg,
+                )[0]
+                for query, chunk in sample_pairs
+            ]
+            reports[mode]["stability"] = {
+                "sample_size": len(first),
+                "label_differences": sum(a.score != b.score for a, b in zip(first, second)),
+            }
+
+    # Grader-free baselines use the same retrieved chunks and categorical labels.
+    sim_rows: list[float] = []
+    sim_labels: list[str] = []
+    for item, labels in zip(items, labelss, strict=True):
+        similarities = retriever.vector_similarities(
+            item.query, [chunk.id for chunk in retrieved[item.id]]
+        )
+        sim_rows.extend(similarities[chunk.id] for chunk in retrieved[item.id])
+        sim_labels.extend(labels)
+    thresholds = tuple(round(0.50 + index * 0.05, 2) for index in range(8))
+    similarity_rows = similarity_baseline(sim_rows, sim_labels, thresholds)
+    best_similarity = max(thresholds, key=lambda t: similarity_rows[t]["f1"])
+    baseline = {
+        "vector_similarity": {
+            "thresholds": {str(k): v for k, v in similarity_rows.items()},
+            "best": best_similarity,
+            "optimistic_dev_tuning": True,
+        },
+        "top1": top1_baseline([retrieved[item.id] for item in items], labelss),
     }
-
-    # Disagreements need (item, graded chunk, label) triples over all chunks.
-    triples: list[tuple[GoldenItem, Chunk, bool]] = []
-    for item, graded, labels in zip(items, gradeds, labelss, strict=True):
-        triples.extend(zip([item] * len(graded), graded, labels, strict=True))
-    top_disagreements = disagreements(triples, limit=10)
-
-    n_total_chunks = sum(len(graded) for graded in gradeds)
     report: dict[str, Any] = {
         "generated_at": datetime.now(UTC).isoformat(),
-        "prompt_version": DEFAULT_GRADER.prompt_version,
         "model": model_tag,
         "corpus_version": retriever.corpus_version,
         "set_path": str(args.set),
         "split": split,
         "top_n": args.top_n,
-        "thresholds": {"relevant": 75, "ambiguous": 50},
         "n_positives": len(positives),
         "n_negatives": len(negatives),
-        "n_graded_chunks": n_total_chunks,
-        "per_chunk": per_chunk,
-        "question_outcomes_at_75": outcome_counts,
-        "threshold_sweep": {str(k): v for k, v in sweep.items()},
-        "recommended_threshold": recommended,
-        "position_bias": bias,
-        "parse_failures": {
-            "count": len(parse_failures),
-            "rate": len(parse_failures) / n_total_chunks if n_total_chunks else 0.0,
-            "chunk_ids": parse_failures,
-        },
-        "latency_per_batch_s": {
-            "median": statistics.median(batch_latencies) if batch_latencies else None,
-            "p95": percentile(batch_latencies, 0.95) if batch_latencies else None,
-            "n_batches": len(batch_latencies),
-        },
-        "disagreements": top_disagreements,
-        "per_question": [
-            {
-                "id": item.id,
-                "query": item.query,
-                "outcome": outcomes[item.id],
-                "scores": [
-                    {"id": chunk.id, "score": chunk.score, "relevant": label}
-                    for chunk, label in zip(graded, labels, strict=True)
-                ],
-            }
-            for item, graded, labels in zip(items, gradeds, labelss, strict=True)
-        ],
+        "modes": reports,
+        "baselines": baseline,
         "git_commit": _git_commit(),
     }
 
@@ -293,75 +333,42 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _print_report(report: dict[str, Any]) -> None:
-    print(f"\nmodel={report['model']}  prompt={report['prompt_version']}  split={report['split']}")
+    print(f"\nmodel={report['model']}  split={report['split']}")
+    print(f"positives={report['n_positives']}  negatives={report['n_negatives']}")
+    print("\n== side-by-side grader metrics ==")
     print(
-        f"positives={report['n_positives']}  negatives={report['n_negatives']}  "
-        f"graded chunks={report['n_graded_chunks']}"
+        "mode       P75     R75     F1-75   TP FP FN TN   P50     R50     F1-50   calls  failures"
     )
-
-    print("\n== per-chunk metrics vs proxy labels ==")
-    for threshold, block in report["per_chunk"].items():
-        prf = block["precision_recall_f1"]
+    for mode, block in report["modes"].items():
+        m75 = block["per_chunk"]["75"]
+        m50 = block["per_chunk"]["50"]
+        c = m75["confusion"]
         print(
-            f"  threshold {threshold}: precision={prf['precision']:.3f} "
-            f"recall={prf['recall']:.3f} f1={prf['f1']:.3f}"
+            f"{mode:<10} {m75['precision_recall_f1']['precision']:.3f} "
+            f"{m75['precision_recall_f1']['recall']:.3f} "
+            f"{m75['precision_recall_f1']['f1']:.3f} "
+            f"{c['TP']:2} {c['FP']:2} {c['FN']:2} {c['TN']:2} "
+            f"{m50['precision_recall_f1']['precision']:.3f} "
+            f"{m50['precision_recall_f1']['recall']:.3f} "
+            f"{m50['precision_recall_f1']['f1']:.3f} "
+            f"{block['latency_s']['n_calls']:5} "
+            f"{block['parse_failures']['count']:8}"
         )
-        for label, dist in block["score_distribution"].items():
-            if dist["n"]:
-                print(
-                    f"    {label}: median={dist['median']:.0f} q1={dist['q1']:.0f} "
-                    f"q3={dist['q3']:.0f} (n={dist['n']})"
-                )
-
-    print("\n== question-level outcomes at threshold 75 ==")
-    for outcome, count in sorted(report["question_outcomes_at_75"].items()):
-        print(f"  {outcome}: {count}")
-
-    print("\n== threshold sweep (question-level counts) ==")
-    header = f"{'thr':>4}  " + "  ".join(
-        f"{name}" for name in ("correct", "wrong_gen", "retry", "miss", "false_gen")
-    )
-    print(header)
-    aliases = {
-        "correct": "correct",
-        "wrong_gen": "wrong_generate",
-        "retry": "needless_retry",
-        "miss": "retrieval_miss",
-        "false_gen": "false_generate",
-    }
-    for threshold, counts in report["threshold_sweep"].items():
+        print(f"  {mode}: prompt={block['prompt_version']} base_rate={m75['base_rate']:.3f}")
+        print(f"  outcomes@75: {block['question_outcomes_at_75']}")
+        if "stability" in block:
+            print(f"  stability: {block['stability']}")
+    print("\n== grader-free baselines ==")
+    for threshold, metrics in report["baselines"]["vector_similarity"]["thresholds"].items():
         print(
-            f"{threshold:>4}  "
-            + "  ".join(f"{counts.get(aliases[name], 0):>7}" for name in aliases)
+            f"  vector similarity {threshold}: P={metrics['precision']:.3f} "
+            f"R={metrics['recall']:.3f} F1={metrics['f1']:.3f}"
         )
     print(
-        f"\nrecommended relevant threshold: {report['recommended_threshold']} "
-        "(recommendation only; config not edited)"
+        f"  best vector threshold={report['baselines']['vector_similarity']['best']} "
+        "(optimistic dev-set tuning)"
     )
-
-    bias = report["position_bias"]
-    print(
-        f"\n== position bias ==\n  mean |score diff|={bias['mean_abs_diff']:.2f}  "
-        f"threshold flips={bias['flip_fraction'] * 100:.1f}% of {bias['n']} chunks"
-    )
-
-    failures = report["parse_failures"]
-    latency = report["latency_per_batch_s"]
-    print(f"\n== parse failures ==\n  {failures['count']} ({failures['rate'] * 100:.1f}%)")
-    if latency["median"] is not None:
-        print(
-            f"== batch latency ==\n  median={latency['median']:.2f}s "
-            f"p95={latency['p95']:.2f}s over {latency['n_batches']} batches"
-        )
-
-    print("\n== 10 largest disagreements (grader vs proxy label; inspect by hand) ==")
-    for row in report["disagreements"]:
-        pages = row["pdf_pages"]
-        print(
-            f"  [{row['proxy_label']} -> score {row['score']}] {row['query']!r}\n"
-            f"    {row['book']} pages {pages[0]}-{pages[1]}  ({row['chunk_id']})\n"
-            f"    {row['text_preview'][:120]}"
-        )
+    print(f"  top-1 baseline: {report['baselines']['top1']}")
 
 
 if __name__ == "__main__":

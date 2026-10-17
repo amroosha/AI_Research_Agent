@@ -15,16 +15,20 @@ import pytest
 
 from research_agent.config import DEFAULT_GRADER, DEFAULT_LLM, GraderSettings
 from research_agent.eval.grader_eval import (
+    confusion_counts,
     disagreements,
     position_bias,
     precision_recall_f1,
     proxy_labels,
     question_outcome,
     score_distribution,
+    similarity_baseline,
     threshold_sweep,
 )
 from research_agent.golden import GoldenItem
 from research_agent.grader import (
+    LABEL_SCORES,
+    ChunkLabel,
     GradeBatch,
     build_batches,
     build_prompt,
@@ -37,6 +41,7 @@ from research_agent.grader import (
 from research_agent.state import Chunk
 
 BOOK = "synthetic-book"
+BATCH = GraderSettings(mode="batch")
 
 
 def _load_script_module():
@@ -103,6 +108,8 @@ class FakeStructured:
         reply = self.script.pop(0)
         if isinstance(reply, Exception):
             raise reply
+        if isinstance(reply, str):
+            return SimpleNamespace(label=reply)
         refs = [ref for ref, score in reply]
         scores = [score for ref, score in reply]
         return SimpleNamespace(refs=refs, scores=scores)
@@ -133,7 +140,7 @@ def _batch(*, refs_scores: list[tuple[int, int]]) -> GradeBatch:
 
 
 def test_prompt_labels_chunks_in_order() -> None:
-    template = load_prompt(DEFAULT_GRADER.prompt_version)
+    template = load_prompt("grader_v1")
     chunks = [_chunk(0), _chunk(1)]
     prompt = build_prompt("what is X?", chunks, template)
     assert "[1]" in prompt and "[2]" in prompt
@@ -212,7 +219,7 @@ def test_validate_grades_missing_and_duplicate_refs() -> None:
 def test_valid_batch_maps_refs_to_chunks_in_order() -> None:
     llm = FakeLLM([[(1, 95), (2, 40), (3, 70)]])
     chunks = [_chunk(0), _chunk(1), _chunk(2)]
-    graded = grade_chunks(llm, "q?", chunks)
+    graded = grade_chunks(llm, "q?", chunks, BATCH)
     assert [chunk.score for chunk in graded] == [95, 40, 70]
     assert [chunk.id for chunk in graded] == [chunk.id for chunk in chunks]
     # Inputs untouched (frozen model, new instances returned).
@@ -222,9 +229,57 @@ def test_valid_batch_maps_refs_to_chunks_in_order() -> None:
 def test_missing_ref_retry_succeeds() -> None:
     # First reply misses ref 2; the retry (same batch) is complete.
     llm = FakeLLM([[(1, 90)], [(1, 90), (2, 30)]])
-    graded = grade_chunks(llm, "q?", [_chunk(0), _chunk(1)])
+    graded = grade_chunks(llm, "q?", [_chunk(0), _chunk(1)], BATCH)
     assert [chunk.score for chunk in graded] == [90, 30]
     assert len(llm.prompts) == 2  # first reply + retry
+
+
+def test_none_batch_result_retries_successfully() -> None:
+    llm = FakeLLM([None, [(1, 90), (2, 30)]])
+    graded = grade_chunks(llm, "q?", [_chunk(0), _chunk(1)], BATCH)
+    assert [chunk.score for chunk in graded] == [90, 30]
+    assert len(llm.prompts) == 2
+
+
+def test_none_batch_result_uses_individual_fallback() -> None:
+    llm = FakeLLM([None, None, None, None, None, None])
+    failures: list[str] = []
+    graded = grade_chunks(llm, "q?", [_chunk(0), _chunk(1)], BATCH, parse_failures=failures)
+    assert [chunk.score for chunk in graded] == [0, 0]
+    assert failures == [chunk.id for chunk in [_chunk(0), _chunk(1)]]
+
+
+@pytest.mark.parametrize(
+    ("label", "score"),
+    [("direct", 95), ("partial", 80), ("related", 60), ("unrelated", 15)],
+)
+def test_pointwise_label_mapping(label: str, score: int) -> None:
+    assert LABEL_SCORES[label] == score
+    assert ChunkLabel(label=label).label == label
+
+
+def test_pointwise_grading_preserves_order_and_inputs() -> None:
+    llm = FakeLLM(["unrelated", "direct", "partial"])
+    chunks = [_chunk(0), _chunk(1), _chunk(2)]
+    graded = grade_chunks(llm, "q?", chunks, GraderSettings(mode="pointwise"))
+    assert [chunk.score for chunk in graded] == [15, 95, 80]
+    assert [chunk.id for chunk in graded] == [chunk.id for chunk in chunks]
+    assert all(chunk.score is None for chunk in chunks)
+
+
+def test_pointwise_invalid_result_retries_then_counts_failure() -> None:
+    llm = FakeLLM([None, None])
+    failures: list[str] = []
+    graded = grade_chunks(
+        llm,
+        "q?",
+        [_chunk(0)],
+        GraderSettings(mode="pointwise"),
+        parse_failures=failures,
+    )
+    assert graded[0].score == 0
+    assert failures == [graded[0].id]
+    assert len(llm.prompts) == 2
 
 
 def test_retry_fails_then_individual_fallback() -> None:
@@ -237,7 +292,7 @@ def test_retry_fails_then_individual_fallback() -> None:
             [(1, 20)],  # chunk 2 individually
         ]
     )
-    graded = grade_chunks(llm, "q?", [_chunk(0), _chunk(1)])
+    graded = grade_chunks(llm, "q?", [_chunk(0), _chunk(1)], BATCH)
     assert [chunk.score for chunk in graded] == [80, 20]
 
 
@@ -254,7 +309,7 @@ def test_individual_failure_scores_zero_and_counted() -> None:
     )
     chunks = [_chunk(0), _chunk(1)]
     failures: list[str] = []
-    graded = grade_chunks(llm, "q?", chunks, parse_failures=failures)
+    graded = grade_chunks(llm, "q?", chunks, BATCH, parse_failures=failures)
     assert [chunk.score for chunk in graded] == [80, 0]
     assert failures == [chunks[1].id]
 
@@ -267,7 +322,7 @@ def test_empty_chunks_returns_empty() -> None:
 def test_latencies_recorded_per_call() -> None:
     llm = FakeLLM([[(1, 50)]])
     latencies: list[float] = []
-    grade_chunks(llm, "q?", [_chunk(0)], latencies=latencies)
+    grade_chunks(llm, "q?", [_chunk(0)], BATCH, latencies=latencies)
     assert len(latencies) == 1
     assert latencies[0] >= 0.0
 
@@ -278,13 +333,33 @@ def test_latencies_recorded_per_call() -> None:
 def test_proxy_labels_from_ranges() -> None:
     item = _item(ranges=((10, 12),))
     chunks = [_chunk(0, start=11), _chunk(1, start=50)]
-    assert proxy_labels(chunks, item) == [True, False]
+    assert proxy_labels(chunks, item) == ["relevant", "not_relevant"]
 
 
 def test_proxy_labels_negative_all_false() -> None:
     item = _item(book=None, ranges=(), is_negative=True)
     chunks = [_chunk(0, start=11), _chunk(1)]
-    assert proxy_labels(chunks, item) == [False, False]
+    assert proxy_labels(chunks, item) == ["not_relevant", "not_relevant"]
+
+
+def test_proxy_labels_near_boundaries() -> None:
+    item = _item(ranges=((10, 12),))
+    chunks = [_chunk(0, start=9), _chunk(1, start=13), _chunk(2, start=14)]
+    assert proxy_labels(chunks, item) == ["near", "near", "not_relevant"]
+
+
+def test_confusion_counts_and_base_rate() -> None:
+    assert confusion_counts([True, True, False, False], [True, False, True, False]) == {
+        "TP": 1,
+        "FP": 1,
+        "FN": 1,
+        "TN": 1,
+    }
+
+
+def test_similarity_baseline_hand_computed() -> None:
+    result = similarity_baseline([0.9, 0.6, 0.4], ["relevant", "near", "not_relevant"], [0.5])
+    assert result[0.5]["confusion"] == {"TP": 1, "FP": 1, "FN": 0, "TN": 1}
 
 
 def test_precision_recall_f1_hand_computed() -> None:

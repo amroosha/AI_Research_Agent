@@ -147,6 +147,17 @@ def test_corpus_version_exposed(index_env, embedder: HashEmbedder) -> None:
     assert retriever.corpus_version == manifest["corpus_version"]
 
 
+def test_get_chunks_preserves_order_and_rejects_unknown_id(
+    index_env, embedder: HashEmbedder
+) -> None:
+    retriever = _retriever(index_env, embedder)
+    ids = list(retriever._records_by_id)[:2]
+    assert [chunk.id for chunk in retriever.get_chunks(ids)] == ids
+    assert retriever.get_chunk(ids[0]).id == ids[0]
+    with pytest.raises(KeyError, match="unknown chunk id"):
+        retriever.get_chunk("missing-chunk")
+
+
 # --- search_bm25 --------------------------------------------------------------
 
 
@@ -181,6 +192,15 @@ def test_vector_own_text_returns_chunk_first(index_env, embedder: HashEmbedder) 
     record = records[9]
     top = retriever.search_vector(record["text"], 3)
     assert top[0] == record["id"]
+
+
+def test_vector_similarities_own_text_and_unknown_id(index_env, embedder: HashEmbedder) -> None:
+    retriever = _retriever(index_env, embedder)
+    record = list(retriever._records_by_id.values())[9]
+    similarities = retriever.vector_similarities(record["text"], [record["id"]])
+    assert similarities[record["id"]] > 0.8
+    with pytest.raises(KeyError, match="unknown chunk id"):
+        retriever.vector_similarities("query", ["missing-chunk"])
 
 
 # --- retrieve -----------------------------------------------------------------

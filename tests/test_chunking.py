@@ -15,6 +15,8 @@ from research_agent.ingest.chunking import (
     make_index_text,
     validate_chunks,
 )
+from research_agent.ingest.chunking.classes import Block, Piece, _Chunk
+from research_agent.ingest.chunking.helpers import _merge_tiny_final, _pack_group, split_block
 
 # Small settings so tests exercise splitting/merging with few words.
 SMALL = IngestSettings(
@@ -63,9 +65,9 @@ def test_prose_merges_across_pages(tmp_path: None) -> None:
         page(2, "the next page seamlessly here.", ["C"]),
     ]
     chunks = run(pages)
-    assert len(chunks) == 1
-    assert chunks[0]["pdf_page_start"] == 1
-    assert chunks[0]["pdf_page_end"] == 2
+    assert len(chunks) == 2
+    assert all(chunk["pdf_page_start"] == 1 for chunk in chunks)
+    assert all(chunk["pdf_page_end"] == 2 for chunk in chunks)
     assert "continues onto the next page" in chunks[0]["text"]
 
 
@@ -130,6 +132,66 @@ def test_tiny_final_chunk_merges() -> None:
     # Either merged into one chunk, or the final tiny chunk is kept (not dropped).
     assert all(c["text"].strip() for c in chunks)
     assert sum(c["token_count"] <= SMALL.max_tokens for c in chunks) == len(chunks)
+
+
+def test_tiny_final_merge_drops_leading_overlap_once() -> None:
+    def piece(text: str, start: int, overlap: bool = False) -> Piece:
+        return Piece(
+            kind="prose",
+            text=text,
+            pdf_page_start=start,
+            pdf_page_end=start,
+            printed_page_start=None,
+            printed_page_end=None,
+            section_path=["C"],
+            is_overlap=overlap,
+        )
+
+    chunks = [
+        _Chunk(pieces=[piece("one. two.", 1)]),
+        _Chunk(pieces=[piece("two.", 1, overlap=True), piece("three.", 2)]),
+    ]
+    merged = _merge_tiny_final(chunks, SMALL, count_tokens_whitespace, lambda text: 0)
+    assert merged[0].text == "one. two.\n\nthree."
+    assert merged[0].pieces[-1].pdf_page_start == 2
+
+
+def test_code_fence_overhead_is_included_before_packing() -> None:
+    settings = IngestSettings(target_tokens=3, max_tokens=3, overlap_tokens=0, min_chunk_tokens=1)
+    block = Block(
+        kind="code",
+        text="abcdefghij",
+        pdf_page_start=1,
+        pdf_page_end=1,
+        printed_page_start=None,
+        printed_page_end=None,
+        section_path=["C"],
+    )
+    chunks = _pack_group([block], settings, lambda text: len(text) // 4, lambda text: 0)
+    assert chunks
+    assert all(len(chunk.text) // 4 <= settings.max_tokens for chunk in chunks)
+
+
+def test_hard_split_flushes_before_crossing_and_splits_long_word() -> None:
+    block = Block(
+        kind="prose",
+        text="alpha beta gamma",
+        pdf_page_start=1,
+        pdf_page_end=1,
+        printed_page_start=None,
+        printed_page_end=None,
+        section_path=["C"],
+    )
+    pieces = split_block(block, lambda text: len(text) // 4, 3, lambda text: 0)
+    assert all(len(piece.text) // 4 <= 3 for piece in pieces)
+    assert " ".join(piece.text for piece in pieces) == block.text
+
+    long_word = Block(
+        **{**block.__dict__, "text": "abcdefghijklmno"},
+    )
+    pieces = split_block(long_word, lambda text: len(text) // 4, 3, lambda text: 0)
+    assert all(len(piece.text) // 4 <= 3 for piece in pieces)
+    assert "".join(piece.text for piece in pieces) == long_word.text
 
 
 def test_id_format_and_index() -> None:

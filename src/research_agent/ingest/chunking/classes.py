@@ -31,6 +31,7 @@ class Piece:
     printed_page_start: int | None
     printed_page_end: int | None
     section_path: list[str]
+    is_overlap: bool = False
 
 
 @dataclass

@@ -133,7 +133,7 @@ def test_recall_multi_range() -> None:
     # recall@k over two items: (1/2 covered, 2/2 covered) -> 0.75 mean.
     from research_agent.eval.retrieval_eval import recall_at_k
 
-    assert recall_at_k([(1, 2), (2, 2)], [True, True]) == pytest.approx(0.75)
+    assert recall_at_k([(1, 2), (2, 2)]) == pytest.approx(0.75)
 
 
 def test_hit_wrong_book_is_not_a_hit() -> None:
@@ -200,6 +200,20 @@ def test_evaluate_system_end_to_end_fixture() -> None:
     assert report["recall_at_k"]["6"] == pytest.approx(0.5)  # (1/1 + 0/1) / 2
     assert len(report["missed_at_6"]) == 1
     assert report["missed_at_6"][0]["id"] == items[1].id
+
+
+def test_evaluate_system_recall_uses_top_k_for_each_range() -> None:
+    item = _item(query="multi", ranges=((10, 10), (40, 40)))
+    rankings = {
+        item.id: [
+            _chunk(0, 10, 10),
+            _chunk(1, 1, 2),
+            _chunk(2, 3, 4),
+            _chunk(3, 40, 40),
+        ]
+    }
+    report = evaluate_system("hybrid", rankings, [item], ks=(1, 3, 5))
+    assert report["recall_at_k"] == {"1": 0.5, "3": 0.5, "5": 1.0}
 
 
 def test_evaluate_system_ignores_negatives() -> None:

@@ -64,6 +64,12 @@ def test_section_path_for_page() -> None:
     assert pdf_parse.section_path_for_page(toc, 8) == ["Chapter 2"]
 
 
+def test_section_path_skips_toc_entries_before_page_one() -> None:
+    toc = [[1, "Invalid", -1], [1, "Chapter 1", 2]]
+    assert pdf_parse.section_path_for_page(toc, 1) == []
+    assert pdf_parse.section_path_for_page(toc, 2) == ["Chapter 1"]
+
+
 def test_coalesce_drops() -> None:
     reasons = ["a", "a", None, "b", "b", "b", None]
     assert pdf_parse.coalesce_drops(reasons) == [

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
@@ -126,6 +127,7 @@ class GraderSettings:
     grader_batch: int = 6
     prompt_version: str = "grader_v1"
     token_margin: int = 500
+    mode: Literal["pointwise", "batch"] = "pointwise"
 
 
-DEFAULT_GRADER = GraderSettings()
+DEFAULT_GRADER = GraderSettings(mode="pointwise", prompt_version="grader_v2")

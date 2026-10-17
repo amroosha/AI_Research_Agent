@@ -14,11 +14,11 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 from research_agent.ingest.indexing import load_chunks
+from research_agent.page_ranges import normalize_ranges
 
 # A range wider than this many pages is too loose to be a useful target.
 MAX_USEFUL_RANGE_WIDTH = 10
@@ -57,28 +57,6 @@ def normalize_query(query: str) -> str:
     return " ".join(query.lower().split())
 
 
-def _normalize_ranges(raw: Any, item_id: str) -> tuple[tuple[int, int], ...]:
-    """Normalize both page formats into a tuple of inclusive ``(start, end)``.
-
-    Accepts ``[]`` (negatives), ``[28, 32]`` (single range), and
-    ``[[28, 32], [104, 109]]`` (multiple ranges). Anything else raises.
-    """
-    if not raw:
-        return ()
-    if not isinstance(raw, (list, tuple)):
-        raise TypeError(f"{item_id}: expected_pdf_pages must be a list, got {raw!r}")
-    pairs: list[tuple[int, int]] = []
-    if isinstance(raw[0], (list, tuple)):
-        elements: Sequence[Any] = raw
-    else:
-        elements = [raw]
-    for element in elements:
-        if not isinstance(element, (list, tuple)) or len(element) != 2:
-            raise ValueError(f"{item_id}: malformed page range {element!r}")
-        pairs.append((int(element[0]), int(element[1])))
-    return tuple(pairs)
-
-
 def load_golden(path: Path | str) -> list[GoldenItem]:
     """Load a golden YAML file into ``GoldenItem`` records.
 
@@ -103,7 +81,7 @@ def load_golden(path: Path | str) -> list[GoldenItem]:
                 id=item_id,
                 query=query,
                 book=None if is_negative else book_text,
-                ranges=_normalize_ranges(entry.get("expected_pdf_pages"), item_id),
+                ranges=normalize_ranges(entry.get("expected_pdf_pages"), item_id),
                 is_negative=is_negative,
                 source_file=str(path),
             )

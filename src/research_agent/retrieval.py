@@ -154,6 +154,17 @@ class HybridRetriever:
         """All corpus chunks as frozen :class:`Chunk` objects, keyed by id."""
         return dict(self._chunks_by_id)
 
+    def get_chunk(self, chunk_id: str) -> Chunk:
+        """Return one corpus chunk by id."""
+        try:
+            return self._chunks_by_id[chunk_id]
+        except KeyError as exc:
+            raise KeyError(f"unknown chunk id: {chunk_id!r}") from exc
+
+    def get_chunks(self, ids: Sequence[str]) -> list[Chunk]:
+        """Return corpus chunks in the order of ``ids``."""
+        return [self.get_chunk(chunk_id) for chunk_id in ids]
+
     def _to_chunk(self, record: dict) -> Chunk:
         return Chunk(
             id=record["id"],
@@ -196,6 +207,24 @@ class HybridRetriever:
     def search_vector(self, query: str, k: int) -> list[str]:
         """Top-k chunk ids by cosine similarity (embeddings are normalized)."""
         return [chunk_id for chunk_id, _score in self.search_vector_scored(query, k)]
+
+    def vector_similarities(self, query: str, chunk_ids: Sequence[str]) -> dict[str, float]:
+        """Return cosine similarities for the requested chunk ids."""
+        for chunk_id in chunk_ids:
+            self.get_chunk(chunk_id)
+        if not chunk_ids:
+            return {}
+        query_vector = self._embedder.embed([self.cfg.query_instruction + query])[0]
+        result = self._collection.get(ids=list(chunk_ids), include=["embeddings"])
+        embeddings_by_id = dict(zip(result["ids"], result["embeddings"], strict=True))
+        query_norm = sum(value * value for value in query_vector) ** 0.5
+        similarities: dict[str, float] = {}
+        for chunk_id in chunk_ids:
+            vector = embeddings_by_id[chunk_id]
+            vector_norm = sum(value * value for value in vector) ** 0.5
+            dot = sum(left * right for left, right in zip(query_vector, vector, strict=True))
+            similarities[chunk_id] = dot / (query_norm * vector_norm)
+        return similarities
 
     def retrieve_debug(
         self, queries: str | list[str], final_k: int | None = None
