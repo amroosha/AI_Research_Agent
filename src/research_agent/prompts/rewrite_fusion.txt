@@ -1,0 +1,3 @@
+Generate complementary queries for the question. Cover the main concept,
+an overview, and a practical example. Return JSON with a `queries` array.
+Question: {question}

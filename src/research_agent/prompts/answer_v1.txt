@@ -1,0 +1,5 @@
+Answer the question using only the supplied context. Cite evidence with
+[chunk-id] markers and say when the context is insufficient.
+Question: {question}
+Context:
+{context}

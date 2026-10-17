@@ -1,0 +1,3 @@
+Rewrite the question into focused search queries that target concrete evidence.
+Return JSON with a `queries` array containing up to three concise queries.
+Question: {question}

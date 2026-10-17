@@ -1,0 +1,3 @@
+Rewrite the question into a broader conceptual research query.
+Return JSON with a `queries` array containing one concise query.
+Question: {question}
