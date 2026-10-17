@@ -111,3 +111,21 @@ class RetrievalSettings:
 
 
 DEFAULT_RETRIEVAL = RetrievalSettings()
+
+
+@dataclass(frozen=True)
+class GraderSettings:
+    """LLM grader configuration (Stage 2, T5).
+
+    ``grader_batch`` chunks per structured-output call; ``prompt_version``
+    names the versioned prompt file (``prompts/{prompt_version}.txt``) and is
+    recorded in every eval output; ``token_margin`` reserves headroom when
+    deciding whether a batch fits the context window.
+    """
+
+    grader_batch: int = 6
+    prompt_version: str = "grader_v1"
+    token_margin: int = 500
+
+
+DEFAULT_GRADER = GraderSettings()
