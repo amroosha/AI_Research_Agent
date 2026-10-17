@@ -235,7 +235,7 @@ def run_structured(llm: Any) -> tuple[bool, list[dict[str, Any]]]:
             results.append({"prompt": prompt, "ok": False, "error": str(error)})
             all_ok = False
             continue
-        results.append({"prompt": prompt, "ok": ok, "parsed": parsed if ok else None})
+        results.append({"prompt": prompt, "ok": ok, "parsed": parsed.model_dump() if ok else None})
         all_ok = all_ok and ok
     return all_ok, results
 

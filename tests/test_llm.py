@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from research_agent.config import DEFAULT_LLM, LLMSettings
@@ -21,7 +23,13 @@ MODEL_TAG = "qwen2.5:3b-instruct-q4_K_M"
 
 
 @pytest.fixture(autouse=True)
-def _model_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _model_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    if request.node.get_closest_marker("slow") is not None:
+        # Slow tests hit the real server: keep the real OLLAMA_MODEL from the
+        # environment instead of substituting the fake tag.
+        if not os.environ.get("OLLAMA_MODEL"):
+            pytest.fail("set OLLAMA_MODEL (from `ollama list`) before running slow tests")
+        return
     monkeypatch.setenv("OLLAMA_MODEL", MODEL_TAG)
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
 

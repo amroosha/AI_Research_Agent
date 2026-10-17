@@ -1,0 +1,109 @@
+{
+  "model": "qwen2.5:3b",
+  "base_url": "http://localhost:11434",
+  "generated_at": "2026-10-16T02:48:44.672447+00:00",
+  "chosen_ctx": 8192,
+  "rows": [
+    {
+      "ctx": 4096,
+      "prompt_tokens": 2519,
+      "needle_pass": true,
+      "valid": true,
+      "fully_on_gpu": true,
+      "tokens_per_s": 69.23377097468561,
+      "load_s": 2.6948737,
+      "total_s": 3.9546605,
+      "answer": "AZURE-FALCON-4417",
+      "error": null,
+      "size": 2159374499,
+      "size_vram": 2159374499
+    },
+    {
+      "ctx": 8192,
+      "prompt_tokens": 4967,
+      "needle_pass": true,
+      "valid": true,
+      "fully_on_gpu": true,
+      "tokens_per_s": 66.6020828287721,
+      "load_s": 2.8685873,
+      "total_s": 5.2518187,
+      "answer": "AZURE-FALCON-4417",
+      "error": null,
+      "size": 2314563747,
+      "size_vram": 2314563747
+    },
+    {
+      "ctx": 12288,
+      "prompt_tokens": 7427,
+      "needle_pass": true,
+      "valid": true,
+      "fully_on_gpu": false,
+      "tokens_per_s": 52.596095457131796,
+      "load_s": 3.6403414,
+      "total_s": 7.5062331,
+      "answer": "AZURE-FALCON-4417",
+      "error": null,
+      "size": 2772099397,
+      "size_vram": 2371438509
+    },
+    {
+      "ctx": 16384,
+      "prompt_tokens": 9874,
+      "needle_pass": true,
+      "valid": true,
+      "fully_on_gpu": false,
+      "tokens_per_s": 40.061184354286546,
+      "load_s": 3.8910721,
+      "total_s": 9.3667719,
+      "answer": "AZURE-FALCON-4417",
+      "error": null,
+      "size": 2929301911,
+      "size_vram": 2389662760
+    }
+  ],
+  "structured": {
+    "ok": true,
+    "rows": [
+      {
+        "prompt": "Set word to 'ping' and ok to true because the instruction was followed.",
+        "ok": true,
+        "parsed": {
+          "word": "ping",
+          "ok": true
+        }
+      },
+      {
+        "prompt": "Set word to 'pong' and ok to true because the instruction was followed.",
+        "ok": true,
+        "parsed": {
+          "word": "pong",
+          "ok": true
+        }
+      },
+      {
+        "prompt": "Set word to 'north' and ok to true because the instruction was followed.",
+        "ok": true,
+        "parsed": {
+          "word": "north",
+          "ok": true
+        }
+      },
+      {
+        "prompt": "Set word to 'copper' and ok to true because the instruction was followed.",
+        "ok": true,
+        "parsed": {
+          "word": "copper",
+          "ok": true
+        }
+      },
+      {
+        "prompt": "Set word to 'meadow' and ok to true because the instruction was followed.",
+        "ok": true,
+        "parsed": {
+          "word": "meadow",
+          "ok": true
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,128 @@
+# Retrieval dev set: remaining 20 positive smoke queries. Tune freely here.
+# Same schema as the test set; positives only (negatives live in test_set.yaml).
+queries:
+- query: What are common enterprise machine learning use cases like fraud detection,
+    price optimization, and churn prediction?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 28
+  - 32
+- query: What is the difference between machine learning in research versus in production?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 32
+  - 34
+- query: What is MLOps and how does it relate to ML systems design?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 19
+  - 19
+- query: How do you map business objectives to ML objectives and use experiments like
+    A/B testing?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 51
+  - 54
+- query: 'What are the main data sources: user input, system-generated data, internal
+    databases, and third-party data?'
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 80
+  - 81
+- query: What is JSON and what are its advantages and disadvantages as a data format?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 84
+  - 85
+- query: What is the relational model and how does data normalization work?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 89
+  - 93
+- query: What is the document model in NoSQL and how does it differ from the relational
+    model?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 95
+  - 96
+- query: What is the graph model in NoSQL and when is it useful?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 96
+  - 97
+- query: What is the difference between structured and unstructured data, and what
+    are data warehouses versus data lakes?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 97
+  - 99
+- query: What is the difference between OLTP and OLAP processing?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 101
+  - 103
+- query: 'What are the three main modes of dataflow: through databases, through services,
+    and through real-time transport?'
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 104
+  - 109
+- query: What is the difference between batch processing and stream processing, and
+    what are static versus dynamic features?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 109
+  - 110
+- query: What are sampling methods like simple random sampling, stratified sampling,
+    weighted sampling, and importance sampling?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 116
+  - 118
+- query: What is active learning and how does query-by-committee work?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 131
+  - 132
+- query: What is data augmentation, perturbation, and mixup for training data?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 148
+  - 154
+- query: What is feature scaling, standardization, and log transformation?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 164
+  - 165
+- query: What is feature crossing and how is it used to model nonlinear relationships?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 168
+  - 169
+- query: What is distributed training, including data parallelism, model parallelism,
+    and pipeline parallelism?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 194
+  - 197
+- query: What is AutoML, including hyperparameter tuning, neural architecture search,
+    and learned optimizers?
+  expected_book: designing-machine-learning-systems
+  expected_pdf_pages:
+  - 197
+  - 199
+- query: What is the boiling point of water at sea level in Celsius?
+  expected_book: none
+  expected_pdf_pages: []
+- query: Who painted the Mona Lisa and where is it displayed?
+  expected_book: none
+  expected_pdf_pages: []
+- query: What are the steps of photosynthesis in plants?
+  expected_book: none
+  expected_pdf_pages: []
+- query: How many planets are in the solar system?
+  expected_book: none
+  expected_pdf_pages: []
+- query: In which year did the Berlin Wall fall?
+  expected_book: none
+  expected_pdf_pages: []

@@ -3,6 +3,7 @@ data/raw/
 data/pages/
 data/chunks/
 data/index/
+data/eval/
 
 # Python
 __pycache__/
