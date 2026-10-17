@@ -156,9 +156,16 @@ def test_agent_state_has_expected_keys() -> None:
     expected = {
         "question",
         "current_query",
+        "mode",
+        "queries",
+        "tried_queries",
         "chunks",
         "strategies_tried",
+        "web_used",
         "answer",
         "cited_chunk_ids",
+        "status",
+        "warnings",
+        "llm_calls",
     }
     assert set(AgentState.__annotations__) == expected
