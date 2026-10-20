@@ -90,7 +90,7 @@ def test_rrf_empty_input() -> None:
     assert rrf([]) == []
 
 
-# --- init checks --------------------------------------------------------------
+# --- init checks  --------------------------------------------------------------
 
 
 def test_init_embedding_model_mismatch(index_env, embedder: HashEmbedder) -> None:
