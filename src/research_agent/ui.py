@@ -32,6 +32,7 @@ class RunView:
 
     events: list[str] = field(default_factory=list)
     chunks: list[Chunk] = field(default_factory=list)
+    generation_chunks: list[Chunk] = field(default_factory=list)
     answer: str | None = None
     cited_chunk_ids: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -43,6 +44,8 @@ class RunView:
         self.events.append(event.node)
         if update.get("chunks"):
             self.chunks = merge_chunks(self.chunks, update["chunks"])
+        if "generation_chunks" in update:
+            self.generation_chunks = list(update["generation_chunks"])
         if update.get("answer") is not None:
             self.answer = update["answer"]
         if update.get("cited_chunk_ids"):
@@ -84,14 +87,15 @@ def event_label(node: str) -> str:
 def cited_chunks(view: RunView) -> list[tuple[int, Chunk]]:
     """Resolve generated [n] citations against the ordered context window."""
 
+    chunks = view.generation_chunks
     resolved: list[tuple[int, Chunk]] = []
     for citation in view.cited_chunk_ids:
         try:
             position = int(citation)
         except (TypeError, ValueError):
             continue
-        if 1 <= position <= len(view.chunks):
-            resolved.append((position, view.chunks[position - 1]))
+        if 1 <= position <= len(chunks):
+            resolved.append((position, chunks[position - 1]))
     return resolved
 
 

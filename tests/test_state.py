@@ -160,6 +160,7 @@ def test_agent_state_has_expected_keys() -> None:
         "queries",
         "tried_queries",
         "chunks",
+        "generation_chunks",
         "strategies_tried",
         "web_used",
         "answer",

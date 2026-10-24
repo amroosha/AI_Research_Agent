@@ -109,7 +109,7 @@ def generate(deps: AgentDeps, state: AgentState) -> dict:
         for chunk in state["chunks"]
         if chunk.source == "book"
         and chunk.score is not None
-        and chunk.score >= deps.profile.routing.ambiguous_threshold
+        and chunk.score >= deps.profile.routing.relevant_threshold
     ]
     web = [chunk for chunk in state["chunks"] if chunk.source == "web"]
     selected = (relevant + web)[: deps.profile.generate_k]
@@ -129,6 +129,7 @@ def generate(deps: AgentDeps, state: AgentState) -> dict:
         deps.profile.routing.relevant_threshold,
     )
     return {
+        "generation_chunks": selected,
         "answer": result["answer"],
         "cited_chunk_ids": [str(i) for i in result["citations"]],
         "status": result["status"],
@@ -190,6 +191,7 @@ def stream_agent(question: str, deps: AgentDeps, extra_metadata: dict | None = N
         "queries": [question.strip()],
         "tried_queries": [],
         "chunks": [],
+        "generation_chunks": [],
         "strategies_tried": [],
         "web_used": False,
         "answer": None,

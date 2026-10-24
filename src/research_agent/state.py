@@ -64,6 +64,7 @@ class AgentState(TypedDict):
     queries: list[str]
     tried_queries: Annotated[list[str], operator.add]
     chunks: Annotated[list[Chunk], merge_chunks]
+    generation_chunks: list[Chunk]
     strategies_tried: Annotated[list[Strategy], operator.add]
     web_used: bool
     answer: str | None

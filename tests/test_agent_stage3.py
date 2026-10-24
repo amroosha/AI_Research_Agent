@@ -141,6 +141,7 @@ def test_generation_omits_unrelated_local_chunks() -> None:
                 title="Anime rankings",
             ),
         ],
+        "generation_chunks": [],
         "strategies_tried": [],
         "web_used": True,
         "answer": None,
@@ -154,6 +155,31 @@ def test_generation_omits_unrelated_local_chunks() -> None:
 
     assert "relevant context" not in llm.answer_prompt
     assert "Anime ranking result" in llm.answer_prompt
+
+
+def test_generation_omits_ambiguous_local_chunks() -> None:
+    llm = CaptureAnswerLLM()
+    deps = AgentDeps(EmptyRetriever(), llm, llm, grade_chunks, None, FAST)
+    state = {
+        "question": "top rated anime",
+        "current_query": "top rated anime",
+        "mode": "fast",
+        "queries": ["top rated anime"],
+        "tried_queries": [],
+        "chunks": [_chunk().model_copy(update={"score": 60})],
+        "generation_chunks": [],
+        "strategies_tried": [],
+        "web_used": True,
+        "answer": None,
+        "cited_chunk_ids": [],
+        "status": "generating",
+        "warnings": [],
+        "llm_calls": 0,
+    }
+
+    generate(deps, state)
+
+    assert "relevant context" not in llm.answer_prompt
 
 
 def test_fast_graph_uses_web_when_local_index_is_empty() -> None:

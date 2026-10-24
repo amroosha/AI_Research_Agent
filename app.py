@@ -94,15 +94,15 @@ def render_sidebar() -> None:
 
 def render_sources(view: RunView) -> None:
     with st.expander(
-        f"Evidence used · {len(view.chunks)} passages",
+        f"Evidence used · {len(view.generation_chunks)} passages",
         expanded=False,
         icon=":material/library_books:",
     ):
         cited = {chunk.id for _, chunk in cited_chunks(view)}
-        if not view.chunks:
+        if not view.generation_chunks:
             st.caption("No passages were returned.")
             return
-        for index, chunk in enumerate(view.chunks[:10], 1):
+        for index, chunk in enumerate(view.generation_chunks[:10], 1):
             marker = "Cited" if chunk.id in cited else "Context"
             st.markdown(f"**[{index}] {marker} · {chunk.source.title()}**")
             if chunk.url:

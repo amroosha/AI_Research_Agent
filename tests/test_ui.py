@@ -31,7 +31,12 @@ def test_run_view_accumulates_chunks_and_resolves_numbered_citations() -> None:
     view.apply(
         AgentEvent(
             "generate",
-            {"answer": "Synthesis [2]", "cited_chunk_ids": ["2"], "status": "done"},
+            {
+                "generation_chunks": [_book("a", 90), _book("b", 80)],
+                "answer": "Synthesis [2]",
+                "cited_chunk_ids": ["2"],
+                "status": "done",
+            },
             "generate",
         )
     )
@@ -39,6 +44,27 @@ def test_run_view_accumulates_chunks_and_resolves_numbered_citations() -> None:
     assert view.answer == "Synthesis [2]"
     assert [chunk.id for _, chunk in cited_chunks(view)] == ["b"]
     assert view.status == "done"
+
+
+def test_run_view_exposes_only_generation_chunks() -> None:
+    view = RunView()
+    view.apply(
+        AgentEvent(
+            "grade",
+            {"chunks": [_book("unrelated", 15), _book("relevant", 90)]},
+            "grade",
+        )
+    )
+    view.apply(
+        AgentEvent(
+            "generate",
+            {"generation_chunks": [_book("relevant", 90)]},
+            "generate",
+        )
+    )
+
+    assert [chunk.id for chunk in view.chunks] == ["unrelated", "relevant"]
+    assert [chunk.id for chunk in view.generation_chunks] == ["relevant"]
 
 
 def test_run_view_keeps_higher_score_for_duplicate_chunk() -> None:
