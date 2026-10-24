@@ -1,5 +1,12 @@
-Answer the question using only the supplied context. Cite evidence with
-[chunk-id] markers and say when the context is insufficient.
+Answer the question using the supplied evidence, which may include local
+documents and current web search results. Use the web evidence for questions
+that are unrelated to the local documents or require current information, and
+treat web results as the primary evidence for those questions. Local documents
+marked as unrelated are omitted and must not be used.
+Do not refuse to answer merely because the local document context is
+irrelevant or empty. Cite supporting evidence with numbered markers such as
+[1] and [2]. If the available evidence is insufficient to verify an answer,
+say so clearly instead of inventing facts.
 Question: {question}
 Context:
 {context}

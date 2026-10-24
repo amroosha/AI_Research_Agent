@@ -86,7 +86,10 @@ def rewrite(deps: AgentDeps, state: AgentState) -> dict:
 def web_search(deps: AgentDeps, state: AgentState) -> dict:
     if deps.web_search_fn is None:
         return {"web_used": False, "status": "generating", "warnings": ["web disabled"]}
-    results = deps.web_search_fn(state["question"], deps.profile.web_max_results)
+    query = state["current_query"]
+    if "Current question:" in query:
+        query = query.rsplit("Current question:", 1)[-1].strip()
+    results = deps.web_search_fn(query, deps.profile.web_max_results)
     chunks = [
         Chunk(
             id=f"web-{i}",
@@ -101,8 +104,23 @@ def web_search(deps: AgentDeps, state: AgentState) -> dict:
 
 
 def generate(deps: AgentDeps, state: AgentState) -> dict:
-    selected = state["chunks"][: deps.profile.generate_k]
-    context = "\n\n".join(f"[{i}] {chunk.text}" for i, chunk in enumerate(selected, 1))
+    relevant = [
+        chunk
+        for chunk in state["chunks"]
+        if chunk.source == "book"
+        and chunk.score is not None
+        and chunk.score >= deps.profile.routing.ambiguous_threshold
+    ]
+    web = [chunk for chunk in state["chunks"] if chunk.source == "web"]
+    selected = (relevant + web)[: deps.profile.generate_k]
+    context_parts = []
+    for index, chunk in enumerate(selected, 1):
+        if chunk.source == "web":
+            source = f"Web result: {chunk.title or 'Untitled'} ({chunk.url})"
+        else:
+            source = "Local document"
+        context_parts.append(f"[{index}] {source}\n{chunk.text}")
+    context = "\n\n".join(context_parts)
     result = generate_answer(
         deps.llm,
         state["question"],
@@ -120,12 +138,16 @@ def generate(deps: AgentDeps, state: AgentState) -> dict:
 
 
 def _route(deps: AgentDeps, state: AgentState) -> str:
-    if deps.profile.name == "fast":
-        return "generate"
+    # Web research is an additional evidence source, not only a fallback for
+    # questions that happen to match no local documents.
+    if deps.web_search_fn is not None:
+        return "web_search"
     if any(
         (chunk.score or 0) >= deps.profile.routing.relevant_threshold for chunk in state["chunks"]
     ):
         return "generate"
+    if deps.profile.name == "fast":
+        return "web_search" if deps.web_search_fn is not None else "generate"
     return (
         "rewrite"
         if len(state["strategies_tried"]) < deps.profile.routing.max_retries

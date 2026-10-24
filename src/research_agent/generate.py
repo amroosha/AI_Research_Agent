@@ -28,10 +28,17 @@ def generate_answer(
     if not question.strip():
         raise ValueError("question must not be empty")
     prompt = (
-        "Answer using only the context. Cite supporting passages with numbered "
-        "citations [1], [2]. If evidence is insufficient, state that clearly.\n"
-        f"Question: {question.strip()}\nWeb tried: {web_tried}\n"
-        f"Relevant threshold: {relevant_threshold}\nContext:\n{context}"
+        "Answer the question using the supplied evidence, which may include "
+        "local documents and current web search results. Use web evidence for "
+        "questions unrelated to the local documents or requiring current "
+        "information. Treat web results as the primary evidence for those "
+        "questions. Local documents marked as unrelated are omitted and must "
+        "not be used. Do not refuse to answer merely because local context is "
+        "irrelevant or empty. Cite supporting passages with numbered citations "
+        "[1], [2]. If the available evidence is insufficient to verify an "
+        "answer, say so clearly instead of inventing facts.\n"
+        f"Question: {question.strip()}\nWeb searched: {web_tried}\n"
+        f"Relevant threshold: {relevant_threshold}\nEvidence:\n{context}"
     )
     try:
         result = llm.invoke(prompt)
