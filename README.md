@@ -2,10 +2,11 @@
 
 Local-first, agentic research over an indexed O'Reilly AI book collection.
 
-## Stage 4: Streamlit app
+## Streamlit app
 
-The Streamlit frontend is in [`app.py`](./app.py). It exposes the Stage 3
-agent with:
+The Streamlit frontend is in [`app.py`](./app.py). 
+
+Its features are
 
 - **Fast** and **Deep** research profiles from `research_agent.modes`
 - A persistent chat thread for follow-up questions
@@ -27,9 +28,11 @@ agent with:
 2. Set the required model in `.env` (copy `.env.example` first if needed):
 
    ```text
-   OLLAMA_MODEL=qwen2.5:3b
+   OLLAMA_MODEL=qwen3.5:4b
    OLLAMA_HOST=http://localhost:11434
    ```
+
+   I will be adding another implemetation with llama.cpp
 
    Ollama must be running and the local retrieval index must already exist in
    `data/index/`.
