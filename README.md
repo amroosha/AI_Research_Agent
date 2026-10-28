@@ -37,7 +37,9 @@ Its features are
    Ollama must be running and the local retrieval index must already exist in
    `data/index/`.
 
-3. Launch the interface:
+   You must parse your books then index them before using the research app
+
+4. Launch the interface:
 
    ```powershell
    uv run streamlit run app.py
